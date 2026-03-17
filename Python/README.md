@@ -1,2 +1,2 @@
 # Python scripts
-Check comments in code for details.
+Check all comments in code for details.
