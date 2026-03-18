@@ -8,7 +8,7 @@
 #
 # If just run, it will display on screen. You can also output to CSV if specified.
 #
-# By: UberGuidoZ | https://github.com/UberGuidoZ/Scripts  |  v2.1
+# By: UberGuidoZ | https://github.com/UberGuidoZ/Scripts  |  v2.2
 #
 # RUN FOR USAGE: .\Get-SysInfo.ps1 [-h] [-help] [-ShowHelp] [-?]
 #
