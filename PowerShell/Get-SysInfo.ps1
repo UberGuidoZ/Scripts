@@ -4,10 +4,11 @@
 # System make and model, serial number, type (x86/x64), hostname, domain, user
 #
 # Use -mem to also display detailed memory slot and chip information.
+# Use -pci to also display PCIe device speed and link width information.
 #
 # If just run, it will display on screen. You can also output to CSV if specified.
 #
-# By: UberGuidoZ | https://github.com/UberGuidoZ/Scripts  |  v2.0
+# By: UberGuidoZ | https://github.com/UberGuidoZ/Scripts  |  v2.1
 #
 # RUN FOR USAGE: .\Get-SysInfo.ps1 [-h] [-help] [-ShowHelp] [-?]
 #
@@ -20,6 +21,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [switch]$mem,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$pci,
 
     [Parameter(Mandatory=$false)]
     [Alias('h','help','?')]
@@ -40,10 +44,12 @@ DESCRIPTION:
     - Domain
     - Current user
     Use -mem to also show memory slot usage and per-chip details.
+    Use -pci to also show PCIe device spec version, max and current link
+    speed/width for all active PCIe devices.
     Updates will be posted to https://github.com/UberGuidoZ/Scripts repo.
 
 SYNTAX:
-    .\Get-SysInfo.ps1 [[-Csv] <String>] [-mem] [-h]
+    .\Get-SysInfo.ps1 [[-Csv] <String>] [-mem] [-pci] [-h]
 
 PARAMETERS:
     -Csv <String>
@@ -54,6 +60,12 @@ PARAMETERS:
         Optional. Also queries and displays detailed memory information:
         total/used/empty slots and a per-chip table (capacity, speed,
         manufacturer, part number). The memory table is appended to the
+        CSV when -Csv is also specified.
+
+    -pci
+        Optional. Also queries and displays PCIe device information:
+        spec version, max link speed/width, and current link speed/width
+        for all active PCIe devices. The PCIe table is appended to the
         CSV when -Csv is also specified.
 
     -h, -help, -ShowHelp, -?
@@ -73,10 +85,19 @@ EXAMPLES:
     Example 4: Display with extended memory info
     .\Get-SysInfo.ps1 -mem
 
-    Example 5: Extended info exported to CSV
+    Example 5: Extended memory info exported to CSV
     .\Get-SysInfo.ps1 -mem -Csv "C:\Reports\SysInfo.csv"
 
-    Example 6: Show this help
+    Example 6: Display with PCIe speed and link info
+    .\Get-SysInfo.ps1 -pci
+
+    Example 7: PCIe info exported to CSV
+    .\Get-SysInfo.ps1 -pci -Csv "C:\Reports\SysInfo.csv"
+
+    Example 8: All info displayed and exported to CSV
+    .\Get-SysInfo.ps1 -mem -pci -Csv "C:\Reports\SysInfo.csv"
+
+    Example 9: Show this help
     .\Get-SysInfo.ps1 -h
 
 OUTPUT:
@@ -88,11 +109,17 @@ OUTPUT:
     <basename>.memory.csv with columns:
     Slot, Capacity (GB), Speed (MHz), Manufacturer, Part Number
 
+    With -pci and -Csv, a second CSV is written alongside the first named
+    <basename>.pci.csv with columns:
+    Name, ExpressSpecVersion, MaxLinkSpeed, MaxLinkWidth, CurrentLinkSpeed, CurrentLinkWidth
+
 NOTES:
     - Does not require NT AUTHORITY\SYSTEM; runs in the context of the current user
     - Domain field will show the local machine name if the system is not domain-joined
     - UserName field may be empty if no user is interactively logged in
     - Memory speed falls back to rated Speed if ConfiguredClockSpeed is not populated
+    - PCIe devices without an active link (e.g., USB, legacy PCI) are excluded
+    - CurrentLinkSpeed/Width may be lower than Max if the slot or CPU lanes limit it
 
 =========================================================
 
@@ -186,6 +213,50 @@ if ($mem) {
             Write-Host "Memory details exported to: $memCsvPath" -ForegroundColor Green
         } catch {
             Write-Error "Failed to export memory CSV: $_"
+        }
+    }
+}
+
+# -- Extended PCIe info (only when -pci is passed) -----------------------
+
+if ($pci) {
+
+    try {
+        $pciStats = (Get-WMIObject Win32_Bus -Filter 'DeviceID like "PCI%"').GetRelated('Win32_PnPEntity') |
+            ForEach-Object {
+                [PSCustomObject][ordered]@{
+                    Name               = $_.Name
+                    ExpressSpecVersion = $_.GetDeviceProperties('DEVPKEY_PciDevice_ExpressSpecVersion').deviceProperties.data
+                    MaxLinkSpeed       = $_.GetDeviceProperties('DEVPKEY_PciDevice_MaxLinkSpeed'      ).deviceProperties.data
+                    MaxLinkWidth       = $_.GetDeviceProperties('DEVPKEY_PciDevice_MaxLinkWidth'      ).deviceProperties.data
+                    CurrentLinkSpeed   = $_.GetDeviceProperties('DEVPKEY_PciDevice_CurrentLinkSpeed'  ).deviceProperties.data
+                    CurrentLinkWidth   = $_.GetDeviceProperties('DEVPKEY_PciDevice_CurrentLinkWidth'  ).deviceProperties.data
+                }
+            } | Where-Object { $_.MaxLinkSpeed }
+    } catch {
+        Write-Error "Failed to query PCIe information: $_"
+        exit 1
+    }
+
+    Write-Host "--- PCIe Device Summary ---" -ForegroundColor Cyan
+    if ($pciStats) {
+        $pciStats | Format-Table -AutoSize
+        Write-Host "Total PCIe devices found: $(@($pciStats).Count)" -ForegroundColor Cyan
+    } else {
+        Write-Host "No active PCIe devices found." -ForegroundColor Yellow
+    }
+
+    # Append PCIe CSV alongside the main one if -Csv was also given
+    if ($Csv) {
+        $pciCsvPath = [System.IO.Path]::Combine(
+            [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Csv)),
+            [System.IO.Path]::GetFileNameWithoutExtension($Csv) + ".pci.csv"
+        )
+        try {
+            $pciStats | Export-Csv -Path $pciCsvPath -NoTypeInformation -Force -Encoding UTF8
+            Write-Host "PCIe details exported to: $pciCsvPath" -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to export PCIe CSV: $_"
         }
     }
 
